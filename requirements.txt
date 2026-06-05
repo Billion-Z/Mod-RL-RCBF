@@ -1,0 +1,9 @@
+numpy
+gym==0.23.1
+matplotlib
+tqdm
+gpytorch
+qpth
+quadprog
+pyglet==1.5.27
+comet-ml
