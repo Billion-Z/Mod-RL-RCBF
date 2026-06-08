@@ -6,7 +6,9 @@ from envs.pvtol_env import PvtolEnv
 This file includes a function that simply returns one of the supported environments. 
 """
 
-
+# env_name：环境名称。
+# obs_config：障碍物配置。
+# rand_init：是否随机选择初始状态。
 def build_env(env_name, obs_config='default', rand_init=False):
     """Build our custom gym environment."""
 

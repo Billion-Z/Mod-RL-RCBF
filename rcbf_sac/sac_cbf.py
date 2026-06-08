@@ -74,9 +74,12 @@ class RCBF_SAC(object):
             batch_size = state.shape[0]
             action = torch.zeros((batch_size, self.action_space.shape[0])).to(self.device)
             for i in range(batch_size):
+                # action_space.sample() 从动作允许范围内随机产生动作。
                 action[i] = torch.from_numpy(self.action_space.sample()).to(self.device)
         else:
             if evaluate is False:
+
+                # 由策略神经网络根据当前观测产生动作。
                 action, _, _ = self.policy.sample(state)
             else:
                 _, _, action = self.policy.sample(state)

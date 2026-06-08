@@ -3,7 +3,7 @@ import gym
 from gym import spaces
 from envs.utils import to_pixel
 from rcbf_sac.utils import get_polygon_normals
-
+# UnicycleEnv 继承于 Gym 的环境基类。
 class UnicycleEnv(gym.Env):
     """Custom Environment that follows SafetyGym interface"""
 
@@ -17,6 +17,8 @@ class UnicycleEnv(gym.Env):
         # Define action and observation space
         # They must be gym.spaces objects
         # Example when using discrete actions:
+
+        # 动作空间，action = [v, omega]，[线速度, 角速度]，shape=(2,)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,))
         self.safe_action_space = spaces.Box(low=-2.5, high=2.5, shape=(2,))
         self.observation_space = spaces.Box(low=-1e10, high=1e10, shape=(7,))
@@ -29,6 +31,12 @@ class UnicycleEnv(gym.Env):
         # Initialize Env
         self.state = None
         self.episode_step = 0
+#         state = [x, y, theta]
+        # x：机器人横坐标。
+        # y：机器人纵坐标。
+        # theta：机器人朝向角，单位是弧度。
+#         [-2.5, -2.5, 0.0]
+        # 表示机器人位于 (-2.5, -2.5)，朝向角为 0，也就是朝 x 轴正方向。    
         self.initial_state = np.array([[-2.5, -2.5, 0.0], [-2.5, 2.5, 0.0], [-2.5, 0.0, 0.0], [2.5, -2.5, np.pi/2]])
         self.goal_pos = np.array([2.5, 2.5])
         self.rand_init = rand_init  # Random Initial State
