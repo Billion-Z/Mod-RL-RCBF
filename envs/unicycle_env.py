@@ -24,6 +24,7 @@ class UnicycleEnv(gym.Env):
         self.observation_space = spaces.Box(low=-1e10, high=1e10, shape=(7,))
         self.bds = np.array([[-3., -3.], [3., 3.]])
 
+        # 每次 step() 代表 0.02 秒
         self.dt = 0.02
         self.max_episode_steps = 1000
         self.reward_goal = 1.0
@@ -66,6 +67,7 @@ class UnicycleEnv(gym.Env):
             self.hazards.append({'type': 'circle', 'radius': 0.6, 'location': 1.5*np.array([1., 1.])})
             self.hazards.append(
                 {'type': 'polygon', 'vertices': np.array([[0.9, 0.9], [2.1, 2.1], [2.1, 0.9]])})
+        # none 没有专门分支。它和 random 完全一样，会生成随机障碍物。这是当前实现与名称含义不一致的地方。
         else:
             n_hazards = 6
             hazard_radius = 0.6
@@ -75,6 +77,11 @@ class UnicycleEnv(gym.Env):
         self.viewer = None
 
 
+#     公开接口 step() 负责：
+    # 把动作裁剪到 [-1,1]；
+    # 调用 _step() 更新内部状态；
+    # 把 3 维真实状态转换成 7 维观测；
+    # 返回 (next_obs, reward, done, info)。
     def step(self, action):
         """Organize the observation to understand what's going on
 
@@ -85,6 +92,9 @@ class UnicycleEnv(gym.Env):
 
         Returns
         -------
+
+        策略网络收到的观测:,使用 cos(theta), sin(theta) 可以避免角度从 π 跳到 -π 时产生数值不连续。
+        7 维观测中没有障碍物位置。策略主要学习到达目标，障碍物由外部的 RCBF-QP 安全层处理。
         new_obs : ndarray
           The new observation with the following structure:
           [pos_x, pos_y, cos(theta), sin(theta), xdir2goal, ydir2goal, dist2goal]
@@ -95,6 +105,12 @@ class UnicycleEnv(gym.Env):
         state, reward, done, info = self._step(action)
         return self.get_obs(), reward, done, info
 
+#   内部 _step() 负责真正的环境计算：
+    # 更新动力学；
+    # 添加扰动；
+    # 计算 reward；
+    # 判断是否结束；
+    # 计算安全 cost。
     def _step(self, action):
         """
 
@@ -115,7 +131,15 @@ class UnicycleEnv(gym.Env):
         """
 
         # Start with our prior for continuous time system x' = f(x) + g(x)u
+        # 动力学系统的动态
         self.state += self.dt * (self.get_f(self.state) + self.get_g(self.state) @ action)
+        # 系统扰动的动态
+#         展开后大约是：
+        # x     ← x - dt · 0.1 cos²(theta)
+        # y     ← y - dt · 0.1 sin(theta)cos(theta)
+        # theta 不变
+        # 可以把它理解为一个确定性的、与朝向相关的未知动力学扰动，供 GP 学习。
+        # 虽然类中定义了 disturb_mean 和 disturb_covar，但随机扰动采样代码已被注释，所以当前环境实际使用的是上面这个确定性扰动。
         self.state -= self.dt * 0.1 * self.get_g(self.state) @ np.array([np.cos(self.state[2]),  0])  #* np.random.multivariate_normal(self.disturb_mean, self.disturb_covar, 1).squeeze()
 
         self.episode_step += 1
@@ -123,9 +147,14 @@ class UnicycleEnv(gym.Env):
         info = dict()
 
         dist_goal = self._goal_dist()
+
+        # reward = 上一步到目标的距离 - 当前到目标的距离
         reward = (self.last_goal_dist - dist_goal)  # -1e-3 * dist_goal
         self.last_goal_dist = dist_goal
         # Check if goal is met
+#         进入目标半径后，再增加：
+        # reward += 1.0
+        # 然后结束 episode。障碍物碰撞不会直接扣 reward，也不会直接终止 episode。
         if self.goal_met():
             info['goal_met'] = True
             reward += self.reward_goal
@@ -134,7 +163,22 @@ class UnicycleEnv(gym.Env):
             done = self.episode_step >= self.max_episode_steps
 
         # Include constraint cost in reward (only during training, i.e. obs_config=='default')
+        # 仅在 obs_config='default' 时，环境检查机器人是否进入圆形障碍物：(x-hx)² + (y-hy)² < radius²
+        # 这里机器人被当作一个点，只检查机器人中心；渲染出来的机器人半径没有参与碰撞计算。
+        # cost 与 reward 是两个独立指标，代码注释虽然写着“Include constraint cost in reward”，实际上并没有把 cost 加入 reward。
         if self.obs_config == 'default':
+#             info['cost'] 只在下面的条件中创建：
+            # if self.obs_config == 'default':
+            # 所以 test、random 和错误落入随机分支的 none 都不会报告碰撞 cost。主训练代码通过 next_info.get('cost', 0) 读取，因此不会报错，但会把缺失的 cost 当成 0。
+
+            # 这意味着：在随机或测试障碍物中，即使机器人穿过障碍物，现有统计也可能显示 cost=0。因此不能用该字段直接评价 zero-shot 测试时的真实碰撞情况。
+            # 整个环境的数据流可以归纳为：
+            # 7维 obs → SAC 输出 [v,omega]
+            #        → 可选 RCBF-QP 修正
+            #        → UnicycleEnv.step()
+            #        → 更新 3维 state
+            #        → 计算任务 reward 和可选 safety cost
+            #        → 重新生成 7维 next_obs
             info['cost'] = 0
             for hazard in self.hazards:
                 if hazard['type'] == 'circle': # They should all be circles if 'default'
@@ -240,6 +284,9 @@ class UnicycleEnv(gym.Env):
 
         return self.viewer.render(return_rgb_array=mode == "rgb_array")
 
+    #  该函数会把世界坐标系中的目标方向旋转到机器人自身坐标系：
+        # goal_compass_x：目标在机器人前后方向的位置
+        # goal_compass_y：目标在机器人左右方向的位置
     def get_obs(self):
         """Given the state, this function returns it to an observation akin to the one obtained by calling env.step
 
@@ -253,9 +300,15 @@ class UnicycleEnv(gym.Env):
         """
 
         rel_loc = self.goal_pos - self.state[:2]
+        # 然后把方向向量近似归一化，使它主要表达“方向”，不表达距离。
         goal_dist = np.linalg.norm(rel_loc)
         goal_compass = self.obs_compass()  # compass to the goal
-
+#         距离单独编码为：
+        # exp(-dist_goal)
+        # 它的特点是：
+        # 越接近目标，数值越接近 1；
+        # 越远离目标，数值越接近 0；
+        # 数值始终有界，便于神经网络处理。
         return np.array([self.state[0], self.state[1], np.cos(self.state[2]), np.sin(self.state[2]), goal_compass[0], goal_compass[1], np.exp(-goal_dist)])
 
     def _get_dynamics(self):
@@ -312,6 +365,16 @@ class UnicycleEnv(gym.Env):
             self.viewer.close()
             self.viewer = None
 
+    # 随机障碍物生成
+    # get_random_hazard_locations (line 315) 尝试生成 6 个障碍物：
+    # 在大约 [-2.4,2.4]^2 中随机选择中心。
+    # 随机选择圆、正方形或三角形。
+    # 尺寸在基础半径的 80%～120% 之间变化。
+    # 障碍物中心之间必须保持一定距离。
+    # 不能太靠近目标。
+    # 不能太靠近四个候选初始状态。
+    # 每个障碍物最多尝试放置 100 次。
+    # 如果某个障碍物尝试 100 次仍无法放下，就会跳过。因此最终数量可能少于 6。函数文档说会返回位置数组，但实际没有 return，而是直接修改 self.hazards。
     def get_random_hazard_locations(self, n_hazards: int, hazard_radius: float):
         """
 
