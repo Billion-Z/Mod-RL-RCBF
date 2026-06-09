@@ -9,29 +9,113 @@ from rcbf_sac.compensator import Compensator
 import numpy as np
 
 
+"""
+class RCBF_SAC(object):
+近似 C++：
+class RCBF_SAC : public object
+
+Python 中几乎所有东西都是对象。这里的 object 是最基础的父类。
+"""
 class RCBF_SAC(object):
 
+    """
+    struct RCBF_SAC {
+        float gamma;
+        float tau;
+        float alpha;
+        QNetwork *critic;
+        QNetwork *critic_target;
+        Policy *policy;
+    };
+
+    """
+
+    """
+    RCBF_SAC(
+        int num_inputs,             //	observation 的维数，Unicycle 中是 7
+        gym::Box& action_space,     // 	动作的范围、维数、随机采样方法
+        GymEnvironment& env,        // 	可能是 UnicycleEnv、SimulatedCarsEnv 或 PvtolEnv
+        argparse::Namespace& args   // 	命令行参数集合，如 args.gamma、args.cuda
+    );
+
+    Python 不在函数声明处检查这些类型。类型是调用函数时才确定的。
+    例如创建 agent 的地方是：
+    agent = RCBF_SAC(
+        env.observation_space.shape[0],
+        env.action_space,
+        env,
+        args
+    )
+    见 main.py (line 491)。
+
+    Unicycle 中这相当于：
+    RCBF_SAC(7, 一个Box对象, 一个UnicycleEnv对象, 一个Namespace对象)
+
+    对象.成员变量
+    对象.成员函数(...)
+    是否在调用函数，看后面有没有圆括号
+
+
+    """
+
+    """
+    __init__ 相当于 C++ 构造函数。创建 RCBF_SAC(...) 时会自动调用它。
+
+    Python 成员变量不需要提前声明。第一次执行：
+    self.gamma = ...
+    就创建了成员变量 gamma。
+    """
     def __init__(self, num_inputs, action_space, env, args):
+        
+        """
+        近似 C++：
+        this->gamma = args.gamma;
+        this->tau = args.tau;
+        this->alpha = args.alpha;
+        默认值定义在 main.py (line 382)。
+        """
+        self.gamma = args.gamma  # 未来奖励折扣
+        self.tau = args.tau      # target critic 软更新比例
+        self.alpha = args.alpha  # 熵温度
 
-        self.gamma = args.gamma
-        self.tau = args.tau
-        self.alpha = args.alpha
-
+        # 这里的policy_type 是字符串 str，通常内容是："Gaussian"
         self.policy_type = args.policy
+
+        # 这是 int，默认值是 1。
         self.target_update_interval = args.target_update_interval
+
+        # 这是 bool，即 True 或 False
         self.automatic_entropy_tuning = args.automatic_entropy_tuning
+
+        # 这里没有复制动作空间，只是让 self.action_space 也指向传进来的那个 Box 对象，类似保存一个 C++ 引用或指针。
         self.action_space = action_space
+
+        # 值A if 条件 else 值B, 类似于C++的args.cuda ? "cuda" : "cpu"
         self.device = torch.device("cuda" if args.cuda else "cpu")
 
+        """
+        critic 内部包含两个 Q 网络 Q1、Q2，结构见 model.py (line 34)。
+        从内向外拆开。
+
+        Unicycle 动作是：[v, omega]
+        所以：action_space.shape == (2,)，其中(2,) 是一个只有一个元素的元组 tuple。逗号表示它是元组。
+        action_space.shape[0]读取元组的第 0 个元素，结果是整数 2。
+        """
         self.critic = QNetwork(num_inputs, action_space.shape[0], args.hidden_size).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=args.lr)
-
+        # critic_target 与 critic 结构相同，但更新更缓慢。
         self.critic_target = QNetwork(num_inputs, action_space.shape[0], args.hidden_size).to(self.device)
+
+        # 把普通 critic 的参数完整复制过去。
         hard_update(self.critic_target, self.critic)
 
         # Alter to Learn Task Modularly without safety considerations
         self.cbf_mode = args.cbf_mode
 
+#         如果使用默认的 Gaussian policy，还会创建：
+        # policy：actor 神经网络。
+        # policy_optim：actor 优化器。
+        # log_alpha、alpha_optim：自动调节探索强度。
         if self.policy_type == "Gaussian":
             # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
             if self.automatic_entropy_tuning is True:
@@ -39,7 +123,15 @@ class RCBF_SAC(object):
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
                 self.alpha_optim = Adam([self.log_alpha], lr=args.lr)
 
+            # 它根据状态输出一个高斯分布，再从分布中采样动作，具体见 model.py (line 94)。
+#             返回三个结果：
+            # action, log_prob, mean_action = self.policy.sample(state)
+            # action：随机采样动作，用于训练和探索
+            # log_prob：这个动作的对数概率，用于计算熵
+            # mean_action：均值动作，用于稳定评估
             self.policy = GaussianPolicy(num_inputs, action_space.shape[0], args.hidden_size, action_space).to(self.device)
+
+            # Adam 是参数修改器：可以暂时把它理解成：根据梯度修改 policy 内部的权重。
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
         else:
@@ -49,12 +141,15 @@ class RCBF_SAC(object):
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
         # CBF layer
+        # 当 cbf_mode != 'off' 时创建可微 CBF-QP 层；
         self.env = env
         self.cbf_layer = None
         if self.cbf_mode != 'off':
             self.cbf_layer = CBFQPLayer(env, args, args.gamma_b, args.k_d, args.l_p)
 
         # compensator
+        # 当 use_comp=True 时额外创建 compensator。
+        # Compensator 是一个小神经网络，试图提前预测 CBF 会怎样修正动作。当前代码只允许它与 model-free baseline 搭配，限制见 main.py (line 507)。
         if args.use_comp:
             self.compensator = Compensator(num_inputs, action_space.shape[0], action_space.low, action_space.high, args)
         else:

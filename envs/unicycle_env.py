@@ -53,6 +53,7 @@ class UnicycleEnv(gym.Env):
         # Build Hazards
         self.obs_config = obs_config
         self.hazards = []
+        # obs_config='default' 时创建 5 个半径为 0.6 的圆形障碍物：
         if obs_config == 'default':  # default
             self.hazards.append({'type': 'circle', 'radius': 0.6, 'location': 1.5*np.array([0., 0.])})
             self.hazards.append({'type': 'circle', 'radius': 0.6, 'location': 1.5*np.array([-1., 1.])})
@@ -98,7 +99,6 @@ class UnicycleEnv(gym.Env):
         new_obs : ndarray
           The new observation with the following structure:
           [pos_x, pos_y, cos(theta), sin(theta), xdir2goal, ydir2goal, dist2goal]
-
         """
 
         action = np.clip(action, -1.0, 1.0)

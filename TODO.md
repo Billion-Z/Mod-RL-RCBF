@@ -5,7 +5,7 @@
 > 使用规则：每完成一次教学，只把对应条目从 `- [ ]` 改成 `- [x]`，并在该条目后追加简短完成记录，例如：`✅ 2026-06-08 已讲：main.py 训练主循环`。
 >
 > 阅读约定：原有条目主要描述论文目标、算法设计意图和应掌握的知识。若当前仓库实现与论文表述存在差异，以新增的“当前代码说明 / 已知实现问题 / 验证注意”为准；学习时应同时记录“论文希望实现什么”和“当前代码实际做了什么”，不要把二者混为一谈。
-> 请注意：用户的水平很低，python语法只会和C部分重叠的那部分（比如赋值，传参，函数等概念），以前也没有过科研经历，现在正在入门，所以讲解的时候要详细，不要泛泛而谈。
+> 请注意：用户的水平很低，python语法只会和C部分重叠的那部分（比如赋值，传参，函数等概念），以前也没有过科研经历，现在正在入门，所以讲解的时候要详细，不要泛泛而谈。讲解过程中附上跳转链接。
 ---
 
 ## 0. 进度总览
@@ -190,15 +190,15 @@ python main.py --env_name Unicycle --cbf_mode off --max_episodes 1 --batch_size 
 
 ### 5.2 SAC agent：`rcbf_sac/sac_cbf.py`
 
-- [ ] 5.2.1 讲清 `RCBF_SAC.__init__` 如何创建 critic、target critic、policy、CBF layer、compensator。
-- [ ] 5.2.2 讲清 `select_action` 的四种情况：warmup、train sampling、evaluate deterministic、safe_action。
-- [ ] 5.2.3 讲清 `update_parameters` 的 batch 采样逻辑。
-- [ ] 5.2.4 讲清 critic target：`r + gamma * (min(Q_target) - alpha log pi)`。
-- [ ] 5.2.5 讲清 critic loss：两个 MSE。
-- [ ] 5.2.6 讲清 policy loss：`alpha * log_pi - min_qf_pi`。
-- [ ] 5.2.7 讲清自动熵温度 `alpha` 的更新。
-- [ ] 5.2.8 讲清 target network soft update。
-- [ ] 5.2.9 讲清保存/加载 actor、critic 的文件。
+- [x] 5.2.1 讲清 `RCBF_SAC.__init__` 如何创建 critic、target critic、policy、CBF layer、compensator。✅ 2026-06-09 已讲：agent 的网络、优化器、安全层与补偿器初始化
+- [x] 5.2.2 讲清 `select_action` 的四种情况：warmup、train sampling、evaluate deterministic、safe_action。✅ 2026-06-09 已讲：名义动作选择、安全修正及返回值
+- [x] 5.2.3 讲清 `update_parameters` 的 batch 采样逻辑。✅ 2026-06-09 已讲：model-free 与真实/模型混合采样
+- [x] 5.2.4 讲清 critic target：`r + gamma * (min(Q_target) - alpha log pi)`。✅ 2026-06-09 已讲：Bellman 目标、mask、双 target critic 与熵项
+- [x] 5.2.5 讲清 critic loss：两个 MSE。✅ 2026-06-09 已讲：双 critic 的误差计算与反向传播
+- [x] 5.2.6 讲清 policy loss：`alpha * log_pi - min_qf_pi`。✅ 2026-06-09 已讲：探索项、收益项及 full/mod 的可微安全动作
+- [x] 5.2.7 讲清自动熵温度 `alpha` 的更新。✅ 2026-06-09 已讲：target entropy、log_alpha 与 alpha loss
+- [x] 5.2.8 讲清 target network soft update。✅ 2026-06-09 已讲：hard copy 初始化与 Polyak soft update
+- [x] 5.2.9 讲清保存/加载 actor、critic 的文件。✅ 2026-06-09 已讲：actor.pkl、critic.pkl、可选 compensator 及续训限制
 
 ### 5.3 Replay Buffer：`rcbf_sac/replay_memory.py`
 
